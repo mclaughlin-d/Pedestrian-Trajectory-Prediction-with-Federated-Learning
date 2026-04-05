@@ -32,6 +32,7 @@ class TrajectoryLSTM(nn.Module):
         super().__init__()
         self.pred = pred
         self.lstm = nn.LSTM(input_dim, hidden_dim, num_layers=num_layers, batch_first=True)
+        self.lstm2 = nn.LSTM(hidden_dim, hidden_dim, num_layers=num_layers, batch_first=True)
         self.fc1 = nn.Linear(hidden_dim, hidden_dim)
         self.fc2 = nn.Linear(hidden_dim, 2)
 
@@ -39,14 +40,16 @@ class TrajectoryLSTM(nn.Module):
     # for next time step (autoregressive)
     def forward(self, x):
         batch_size = x.size(0)
-        out, (h, c) = self.lstm(x)
+        out1, (h1, c1) = self.lstm(x)
+        _, (h2, c2) = self.lstm2(out1)
         last_pos = x[:, -1, :]
 
         preds = []
         current_pos = last_pos
 
         for _ in range(self.pred):
-            out_step, (h, c) = self.lstm(current_pos.unsqueeze(1), (h, c))
+            lstm1_out, (h1, c1) = self.lstm(current_pos.unsqueeze(1), (h1, c1))
+            out_step, (h2, c2) = self.lstm2(lstm1_out, (h2, c2))
             delta = self.fc2(torch.relu(self.fc1(out_step.squeeze(1))))
             current_pos = current_pos + delta   # update position
             preds.append(current_pos.unsqueeze(1))  # append NEW position
@@ -135,7 +138,7 @@ def train(model, trainloader, epochs, lr, device):
     avg_loss = running_loss / (epochs * len(trainloader))
     return avg_loss
 
-def test(model, testloader, device, miss_threshold=1):
+def test(model, testloader, device, miss_threshold=0.1):
     model.to(device)
     model.eval()
     
@@ -180,6 +183,7 @@ def reconstruct(start, displacements):
 # We could modify later to pick a specific pedestrian that we know have enough frames, but for
 # our purposes this is probably good enough 
 def visualize_prediction(model, dataloader, device, save_path="trajectory.png", sample_index=0):
+    model.to(device) # added to hopefully fix error?
     model.eval()
     full_dataset = dataloader.dataset
     # This part is no necessary if I'm just showing one trajectory as with my current call

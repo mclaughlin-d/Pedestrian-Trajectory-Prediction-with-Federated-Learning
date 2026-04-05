@@ -4,6 +4,10 @@ import torch
 from flwr.app import ArrayRecord, ConfigRecord, Context, MetricRecord
 from flwr.serverapp import Grid, ServerApp
 from flwr.serverapp.strategy import FedAvg
+
+# Dani added for testing TODO
+from flwr.common import RecordDict, MetricRecord
+
 import matplotlib
 matplotlib.use("Agg")  # Use non-interactive backend
 from task import TrajectoryLSTM, load_data, test, load_full_dataset, visualize_prediction
@@ -11,6 +15,22 @@ from task import TrajectoryLSTM, load_data, test, load_full_dataset, visualize_p
 # Create ServerApp
 app = ServerApp()
 
+
+def per_client_metrics(results: list[RecordDict], aggregation_type: str) -> MetricRecord:
+    avg_record = {}
+    for record in results:
+        print(f"  metrics: {record}")
+        avg_record["ADE"] = record.metric_records["metrics"]['ADE']
+        avg_record["FDE"] = record.metric_records["metrics"]['FDE']
+        avg_record["miss_rate"] = record.metric_records["metrics"]["miss_rate"]
+        # TODO: actually average metrics instead of returning 0 .
+    
+    avg_record["ADE"] = avg_record["ADE"] / len(results)
+    avg_record["FDE"] = avg_record["FDE"] / len(results)
+    avg_record["miss_rate"] = avg_record["miss_rate"] / len(results)
+    
+    return MetricRecord(avg_record)
+    
 @app.main()
 def main(grid: Grid, context: Context) -> None:
     # Main entry point for the ServerApp.
@@ -24,7 +44,9 @@ def main(grid: Grid, context: Context) -> None:
     arrays = ArrayRecord(global_model.state_dict())
 
     # Initialize FedAvg strategy
-    strategy = FedAvg(fraction_evaluate=fraction_evaluate)
+    strategy = FedAvg(fraction_evaluate=fraction_evaluate,
+                 evaluate_metrics_aggr_fn=per_client_metrics     
+    )
 
     # Start strategy, run FedAvg for `num_rounds`
     result = strategy.start(
