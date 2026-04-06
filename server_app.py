@@ -16,14 +16,21 @@ from task import TrajectoryLSTM, load_data, test, load_full_dataset, visualize_p
 app = ServerApp()
 
 
+"""
+This is a custom client metrics function, which will print per-client metrics during each round
+before aggregating them. This will allow for more individual analysis of clients once we partition
+data intentionally.
+"""
 def per_client_metrics(results: list[RecordDict], aggregation_type: str) -> MetricRecord:
     avg_record = {}
+    avg_record["ADE"] = 0.0
+    avg_record["FDE"] = 0.0
+    avg_record["miss_rate"] = 0.0
     for record in results:
         print(f"  metrics: {record}")
-        avg_record["ADE"] = record.metric_records["metrics"]['ADE']
-        avg_record["FDE"] = record.metric_records["metrics"]['FDE']
-        avg_record["miss_rate"] = record.metric_records["metrics"]["miss_rate"]
-        # TODO: actually average metrics instead of returning 0 .
+        avg_record["ADE"] += record.metric_records["metrics"]['ADE']
+        avg_record["FDE"] += record.metric_records["metrics"]['FDE']
+        avg_record["miss_rate"] += record.metric_records["metrics"]["miss_rate"]
     
     avg_record["ADE"] = avg_record["ADE"] / len(results)
     avg_record["FDE"] = avg_record["FDE"] / len(results)
@@ -45,7 +52,7 @@ def main(grid: Grid, context: Context) -> None:
 
     # Initialize FedAvg strategy
     strategy = FedAvg(fraction_evaluate=fraction_evaluate,
-                 evaluate_metrics_aggr_fn=per_client_metrics     
+                #  evaluate_metrics_aggr_fn=per_client_metrics     
     )
 
     # Start strategy, run FedAvg for `num_rounds`

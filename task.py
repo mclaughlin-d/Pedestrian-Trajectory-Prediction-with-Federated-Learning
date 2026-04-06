@@ -28,34 +28,91 @@ dataset_files = [
 # Model
 class TrajectoryLSTM(nn.Module):
 
-    def __init__(self, input_dim=2, hidden_dim=128, pred=12, output_dim=2, num_layers=2):
+    def __init__(self, input_dim=2, embed_dim=64, hidden_dim=128, latent_dim=32, pred=12, timesteps=12, output_dim=2, num_layers=2):
         super().__init__()
         self.pred = pred
-        self.lstm = nn.LSTM(input_dim, hidden_dim, num_layers=num_layers, batch_first=True)
-        self.lstm2 = nn.LSTM(hidden_dim, hidden_dim, num_layers=num_layers, batch_first=True)
-        self.fc1 = nn.Linear(hidden_dim, hidden_dim)
-        self.fc2 = nn.Linear(hidden_dim, 2)
+        self.pred_timestep = timesteps
 
-    # Predicts trajectory step by step, using previous predicted position as input
-    # for next time step (autoregressive)
-    def forward(self, x):
-        batch_size = x.size(0)
-        out1, (h1, c1) = self.lstm(x)
-        _, (h2, c2) = self.lstm2(out1)
-        last_pos = x[:, -1, :]
+        self.encoder = nn.LSTM(embed_dim, hidden_dim, batch_first=True)
+        self.decoder = nn.LSTM(embed_dim + latent_dim, hidden_dim, batch_first=True)
+        self.fc1 = nn.Linear(input_dim, embed_dim)
+        self.fc2 = nn.Linear(hidden_dim, input_dim)
 
-        preds = []
-        current_pos = last_pos
+        # destination LSTM
+        self.dest_lstm_obs = nn.LSTM(input_dim, hidden_dim, batch_first=True)
+        self.dest_lstm_pred = nn.LSTM(input_dim, hidden_dim, batch_first=True)
+ 
+        # FC -> mu + log_var for reparameterisation (VAE-style KL, like GTPPO)
+        self.dest_fc_obs     = nn.Linear(hidden_dim, latent_dim)
+        self.dest_fc_pred    = nn.Linear(hidden_dim, latent_dim)
+ 
+        # Xavier init for all linear layers (paper: "After Xavier initialization")
+        # https://www.geeksforgeeks.org/deep-learning/xavier-initialization/
+        # basically, initializes weights from some specific distribution, rather than intializing
+        # them all to 0
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.xavier_uniform_(m.weight)
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)
 
-        for _ in range(self.pred):
-            lstm1_out, (h1, c1) = self.lstm(current_pos.unsqueeze(1), (h1, c1))
-            out_step, (h2, c2) = self.lstm2(lstm1_out, (h2, c2))
-            delta = self.fc2(torch.relu(self.fc1(out_step.squeeze(1))))
-            current_pos = current_pos + delta   # update position
-            preds.append(current_pos.unsqueeze(1))  # append NEW position
+    def _encode_destination(self, coords, lstm, fc):
+        """
+        Run absolute position sequence through a destination LSTM, then
+        map the final hidden state to a 32-dim destination vector via FC.
+ 
+        Args:
+            coords : (B, T, 2) -- absolute positions
+            lstm   : destination LSTM module
+            fc     : FC layer projecting hidden_dim -> dest_dim
+        Returns:
+            D : (B, dest_dim)  deterministic destination vector
+        """
+        _, (h, _) = lstm(coords)
+        h = h.squeeze(0)
+        return fc(h)
 
-        preds = torch.cat(preds, dim=1)
-        return preds
+    def forward(self, obs_disp, obs_abs, gt_abs):
+        # input displacement mapped to 64-dim motion feature vector
+        Z = self.fc1(obs_disp) # input -> embedding, taken from eq 1
+        out1, (h1, c1) = self.encoder(Z) # H1, taken from eq 2
+
+
+        D = self._encode_destination(
+            obs_abs, self.dest_lstm_obs, self.dest_fc_obs)
+ 
+        dest_dict = None
+        # ground truth absolute destination
+        # this is the arrow going from left to right in the diagram
+        # so, KL <- D^ <- FC <- Pos~ , basically
+        if gt_abs is not None:
+            # D_hat: 32-dim vector derived from ground-truth future (training only)
+            D_hat = self._encode_destination(
+                gt_abs, self.dest_lstm_pred, self.dest_fc_pred)
+            dest_dict = {'D': D, 'D_hat': D_hat}
+            
+        last_z   = Z[:, -1:, :]
+        D_expand = D.unsqueeze(1)
+        dec_input = torch.cat([last_z, D_expand], dim=-1)
+ 
+        h_dec, c_dec = h1, c1
+        last_abs = obs_abs[:, -1, :] # running absolute position
+ 
+        pred_abs_list = []
+        for _ in range(self.pred_timestep):
+            # Q^{T_obs+1} = F_dec(H^{T_obs}, Z^{T_obs} || D; W_d) - this is equation 5
+            out, (h_dec, c_dec) = self.decoder(dec_input, (h_dec, c_dec))
+            # delta = delta(Q, W_c) - this is equation 6
+            delta = self.fc2(out.squeeze(1))          # (B, 2)
+            last_abs = last_abs + delta # inverse of Eqs 3-4
+            pred_abs_list.append(last_abs.unsqueeze(1))
+ 
+            # Prepare next decoder input
+            z_next = self.fc1(delta.unsqueeze(1))
+            dec_input = torch.cat([z_next, D_expand], dim=-1)
+ 
+        pred_abs = torch.cat(pred_abs_list, dim=1)          # (B, pred_len, 2)
+        return pred_abs, dest_dict
 
 # Dataset
 class TrajectoryDataset(Dataset):
@@ -126,19 +183,21 @@ def train(model, trainloader, epochs, lr, device):
 
     running_loss = 0.0
     for _ in range(epochs):
-        for x, y, _, _ in trainloader:
-            x, y = x.to(device), y.to(device)
+        for obs_disp, y, obs_abs, fut_abs in trainloader:
+            obs_disp, y, obs_abs, fut_abs = obs_disp.to(device), y.to(device), obs_abs.to(device), fut_abs.to(device)
             optimizer.zero_grad()
-            pred = model(x)
-            loss = criterion(pred, y)
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0) # clip gradients
+            pred, dest_dict = model(obs_disp, obs_abs, fut_abs)
+            loss = criterion(pred, fut_abs)
+            dest_loss = nn.functional.mse_loss(dest_dict["D"], dest_dict["D_hat"])
+            loss = loss + 0.001 * dest_loss
             loss.backward()
+            # torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0) # clip gradients
             optimizer.step()
             running_loss += loss.item()
     avg_loss = running_loss / (epochs * len(trainloader))
     return avg_loss
 
-def test(model, testloader, device, miss_threshold=0.1):
+def test(model, testloader, device, miss_threshold=0.5):
     model.to(device)
     model.eval()
     
@@ -148,17 +207,17 @@ def test(model, testloader, device, miss_threshold=0.1):
     misses = 0
 
     with torch.no_grad():
-        for x, y, _, _ in testloader:
-            x, y = x.to(device), y.to(device)
-            pred = model(x)
-            dist = torch.sqrt(((pred - y) ** 2).sum(dim=2))
+        for obs_disp, y, obs_abs, fut_abs in testloader:
+            obs_disp, y, obs_abs, fut_abs = obs_disp.to(device), y.to(device), obs_abs.to(device), fut_abs.to(device)
+            pred, dest_dict = model(obs_disp, obs_abs, fut_abs)
+            dist = torch.sqrt(((pred - fut_abs) ** 2).sum(dim=2))
             ade = dist.mean(dim=1)
             fde = dist[:, -1]
 
             total_ade += ade.sum().item()
             total_fde += fde.sum().item()
             misses += (fde > miss_threshold).sum().item()
-            total_traj += x.size(0)
+            total_traj += obs_disp.size(0)
 
 
     ADE = total_ade / total_traj
@@ -199,15 +258,14 @@ def visualize_prediction(model, dataloader, device, save_path="trajectory.png", 
         obs, fut, obs_abs, fut_abs = full_dataset[sample_index]
 
     obs = obs.to(device)
+    obs_abs_t = obs_abs.to(device)
+    fut_abs_t = fut_abs.to(device)
     fut_abs = fut_abs.cpu().numpy()
     obs_abs = obs_abs.cpu().numpy()
 
     with torch.no_grad(): # disable gradient tracking for speed
-        pred_deltas = model(obs.unsqueeze(0)).squeeze(0).cpu().numpy()
-
-    # Reconstruct absolute trajectory from last observed position
-    start = obs_abs[-1]
-    pred_positions = reconstruct(start, pred_deltas)
+        pred_abs, _ = model(obs.unsqueeze(0), obs_abs_t.unsqueeze(0), fut_abs_t.unsqueeze(0))
+        pred_positions = pred_abs.squeeze(0).cpu().numpy()
 
     plt.figure(figsize=(6,6))
     plt.plot(obs_abs[:,0], obs_abs[:,1], 'bo-', label='Observed')
