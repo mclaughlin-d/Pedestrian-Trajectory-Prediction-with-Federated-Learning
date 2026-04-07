@@ -4,6 +4,7 @@ import torch
 from flwr.app import ArrayRecord, ConfigRecord, Context, MetricRecord
 from flwr.serverapp import Grid, ServerApp
 from flwr.serverapp.strategy import FedAvg
+from flwr.serverapp.strategy import FedProx
 
 # Dani added for testing TODO
 from flwr.common import RecordDict, MetricRecord
@@ -22,20 +23,33 @@ before aggregating them. This will allow for more individual analysis of clients
 data intentionally.
 """
 def per_client_metrics(results: list[RecordDict], aggregation_type: str) -> MetricRecord:
+    ade_list, fde_list, miss_list = [], [], []
     avg_record = {}
     avg_record["ADE"] = 0.0
     avg_record["FDE"] = 0.0
     avg_record["miss_rate"] = 0.0
     for record in results:
-        print(f"  metrics: {record}")
-        avg_record["ADE"] += record.metric_records["metrics"]['ADE']
-        avg_record["FDE"] += record.metric_records["metrics"]['FDE']
-        avg_record["miss_rate"] += record.metric_records["metrics"]["miss_rate"]
-    
-    avg_record["ADE"] = avg_record["ADE"] / len(results)
-    avg_record["FDE"] = avg_record["FDE"] / len(results)
-    avg_record["miss_rate"] = avg_record["miss_rate"] / len(results)
-    
+        ade = record.metric_records["metrics"]['ADE']
+        fde = record.metric_records["metrics"]['FDE']
+        miss = record.metric_records["metrics"]["miss_rate"]
+        ade_list.append(ade)
+        fde_list.append(fde)
+        miss_list.append(miss)
+
+        avg_record["ADE"] += ade
+        avg_record["FDE"] += fde
+        avg_record["miss_rate"] += miss
+
+    n = len(results)
+    avg_record["ADE"] /= n
+    avg_record["FDE"] /= n
+    avg_record["miss_rate"] /= n
+
+    # Add variance metrics
+    avg_record["ADE_std"] = float(np.std(ade_list))
+    avg_record["FDE_std"] = float(np.std(fde_list))
+    avg_record["miss_rate_std"] = float(np.std(miss_list))
+
     return MetricRecord(avg_record)
     
 @app.main()
@@ -55,6 +69,11 @@ def main(grid: Grid, context: Context) -> None:
                 #  evaluate_metrics_aggr_fn=per_client_metrics     
     )
 
+    """strategy = FedProx(
+        fraction_evaluate=fraction_evaluate,
+        proximal_mu=0.1 
+    )"""
+  
     # Start strategy, run FedAvg for `num_rounds`
     result = strategy.start(
         grid=grid,

@@ -4,6 +4,7 @@ import torch
 from flwr.app import ArrayRecord, Context, Message, MetricRecord, RecordDict
 from flwr.clientapp import ClientApp
 import pandas as pd
+import numpy as np
 
 from task import TrajectoryLSTM, load_data, test as test_fn, train as train_fn, dataset_files, sorted_dataset
 
@@ -36,21 +37,34 @@ def train(msg: Message, context: Context):
     batch_size = context.run_config["batch-size"]
     trainloader, _ = load_data(partition_id, num_partitions, batch_size, hist=8, pred=12, big_df=big_df)
 
-    # Call the training function
-    train_loss = train_fn(
+
+    # Train the model
+    train_metrics = train_fn(
         model,
         trainloader,
         context.run_config["local-epochs"],
         msg.content["config"]["lr"],
-        device,
+        device
     )
+    """# Print convergence info
+    print(f"[Client {partition_id}] Training metrics:")
+    print(f"  Avg loss: {train_metrics['avg_loss']:.6f}")
+    print(f"  Std loss: {train_metrics['std_loss']:.6f}")
+    print(f"  Min loss: {train_metrics['min_loss']:.6f}")
+    print(f"  Max loss: {train_metrics['max_loss']:.6f}")"""
 
-    # Construct and return reply Message
-    model_record = ArrayRecord(model.state_dict())
+    # Construct reply Message with aggregated metrics
+    
     metrics = {
-        "train_loss": train_loss,
-        "num-examples": len(trainloader.dataset),
+        "avg_loss": float(train_metrics["avg_loss"]),
+        "std_loss": float(train_metrics["std_loss"]),
+        "min_loss": float(train_metrics["min_loss"]),
+        "max_loss": float(train_metrics["max_loss"]),
+        "num-examples": len(trainloader.dataset)
     }
+
+    
+    model_record = ArrayRecord(model.state_dict())
     metric_record = MetricRecord(metrics)
     content = RecordDict({"arrays": model_record, "metrics": metric_record})
     return Message(content=content, reply_to=msg)
@@ -79,7 +93,7 @@ def evaluate(msg: Message, context: Context):
         "ADE": ADE,
         "FDE": FDE,
         "miss_rate": miss_rate,
-        "num-examples": len(valloader.dataset),
+        "num-examples": len(valloader.dataset)
     }
     metric_record = MetricRecord(metrics)
     content = RecordDict({"metrics": metric_record})

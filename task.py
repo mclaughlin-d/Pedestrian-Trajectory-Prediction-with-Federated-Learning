@@ -198,12 +198,13 @@ def load_full_dataset(batch_size=32, hist=8, pred=12, num_partitions=8):
     return dataloader
 
 # Training
-def train(model, trainloader, epochs, lr, device, kl_weight = 0.001):
+def train(model, trainloader, epochs, lr, device, kl_weight = 0.001, mu=0.1):
     model.to(device)  # move model to GPU if available
+    global_params = [p.clone().detach() for p in model.parameters()] # Added for FedProx
     criterion = nn.MSELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     model.train()
-
+    all_batch_losses = []  # collect batch losses for variance/convergence
     running_loss = 0.0
     for _ in range(epochs):
         for obs_disp, y, obs_abs, fut_abs in trainloader:
@@ -216,12 +217,30 @@ def train(model, trainloader, epochs, lr, device, kl_weight = 0.001):
             if dest_dict is not None:
                 kl_loss = nn.functional.mse_loss(dest_dict["D"], dest_dict["D_hat"])
                 loss += kl_weight * kl_loss
+            """# FedProx term
+            prox_term = 0.0
+            for w, w_global in zip(model.parameters(), global_params):
+                prox_term += ((w - w_global) ** 2).sum()
+
+            loss += (mu / 2) * prox_term"""
             loss.backward()
             # torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0) # clip gradients
             optimizer.step()
+            # Save batch loss for convergence analysis
+            all_batch_losses.append(loss.item())
+
             running_loss += loss.item()
     avg_loss = running_loss / (epochs * len(trainloader))
-    return avg_loss
+    loss_std = float(np.std(all_batch_losses))
+    loss_min = float(np.min(all_batch_losses))
+    loss_max = float(np.max(all_batch_losses))
+    return {
+        "avg_loss": avg_loss,
+        "std_loss": loss_std,
+        "min_loss": loss_min,
+        "max_loss": loss_max,
+        "all_batch_losses": all_batch_losses
+    }
 
 def test(model, testloader, device, miss_threshold=0.5):
     model.to(device)
