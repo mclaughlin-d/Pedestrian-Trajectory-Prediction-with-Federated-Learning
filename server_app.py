@@ -5,6 +5,7 @@ from flwr.app import ArrayRecord, ConfigRecord, Context, MetricRecord
 from flwr.serverapp import Grid, ServerApp
 from flwr.serverapp.strategy import FedAvg
 from flwr.serverapp.strategy import FedProx
+from flwr.serverapp.strategy import FedAdam
 
 # Dani added for testing TODO
 from flwr.common import RecordDict, MetricRecord
@@ -64,9 +65,13 @@ def main(grid: Grid, context: Context) -> None:
     global_model = TrajectoryLSTM(pred=12)
     arrays = ArrayRecord(global_model.state_dict())
 
-    # Initialize FedAvg strategy
+    """# Initialize FedAvg strategy
     strategy = FedAvg(fraction_evaluate=fraction_evaluate,
                 #  evaluate_metrics_aggr_fn=per_client_metrics     
+    )"""
+
+    strategy = FedAdam(
+        fraction_evaluate=1.0
     )
 
     """strategy = FedProx(
