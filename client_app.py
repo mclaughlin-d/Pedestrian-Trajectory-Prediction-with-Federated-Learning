@@ -3,13 +3,22 @@
 import torch
 from flwr.app import ArrayRecord, Context, Message, MetricRecord, RecordDict
 from flwr.clientapp import ClientApp
+import pandas as pd
 
-from task import TrajectoryLSTM, load_data, test as test_fn, train as train_fn, dataset_files
+from task import TrajectoryLSTM, load_data, test as test_fn, train as train_fn, dataset_files, sorted_dataset
 
-num_partitions = len(dataset_files)
+num_partitions = 14
 # Flower ClientApp
 app = ClientApp()
 
+big_df = pd.read_csv(sorted_dataset, sep="\t")
+big_df = big_df.iloc[:, :4]  # keep only first 4 columns
+big_df.columns = ["frame", "pedestrian_id", "x", "y"]
+
+# Ensure numeric columns are floats/ints
+big_df["frame"] = big_df["frame"].astype(int)
+big_df["x"] = big_df["x"].astype(float)
+big_df["y"] = big_df["y"].astype(float)
 
 @app.train()
 # Train the model on local data.
@@ -25,7 +34,7 @@ def train(msg: Message, context: Context):
     #partition_id = context.node_config["partition-id"]
     partition_id = context.node_config["partition-id"] % num_partitions
     batch_size = context.run_config["batch-size"]
-    trainloader, _ = load_data(partition_id, num_partitions, batch_size, hist=8, pred=12)
+    trainloader, _ = load_data(partition_id, num_partitions, batch_size, hist=8, pred=12, big_df=big_df)
 
     # Call the training function
     train_loss = train_fn(
@@ -60,7 +69,7 @@ def evaluate(msg: Message, context: Context):
     #partition_id = context.node_config["partition-id"]
     partition_id = context.node_config["partition-id"] % num_partitions
     batch_size = context.run_config["batch-size"]
-    _, valloader = load_data(partition_id, num_partitions, batch_size, hist=8, pred=12)
+    _, valloader = load_data(partition_id, num_partitions, batch_size, hist=8, pred=12, big_df=big_df)
 
     # Call the evaluation function
     ADE, FDE, miss_rate = test_fn(model, valloader, device)

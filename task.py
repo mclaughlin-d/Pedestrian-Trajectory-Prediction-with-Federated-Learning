@@ -24,18 +24,20 @@ dataset_files = [
     "datasets/students003.txt",
     "datasets/uni_examples.txt"
 ]
+sorted_dataset = "sorted_by_mean_speed.txt"
 
 # Model
 class TrajectoryLSTM(nn.Module):
 
-    def __init__(self, input_dim=2, embed_dim=64, hidden_dim=128, latent_dim=32, pred=12, timesteps=12, output_dim=2, num_layers=2):
+    def __init__(self, input_dim=2, embed_dim=64, hidden_dim=32, latent_dim=32, pred=12, timesteps=12, output_dim=2, num_layers=2):
         super().__init__()
         self.pred = pred
         self.pred_timestep = timesteps
 
-        self.encoder = nn.LSTM(embed_dim, hidden_dim, batch_first=True)
-        self.decoder = nn.LSTM(embed_dim + latent_dim, hidden_dim, batch_first=True)
         self.fc1 = nn.Linear(input_dim, embed_dim)
+        self.encoder = nn.LSTM(embed_dim, hidden_dim, batch_first=True)
+
+        self.decoder = nn.LSTM(embed_dim + latent_dim, hidden_dim, batch_first=True)
         self.fc2 = nn.Linear(hidden_dim, input_dim)
 
         # destination LSTM
@@ -143,14 +145,35 @@ class TrajectoryDataset(Dataset):
             torch.FloatTensor(obs_abs),
             torch.FloatTensor(fut_abs)
         )
+# Split a DataFrame by pedestrian into N clients
+def split_df_into_clients(df: pd.DataFrame, num_clients: int):
+    """
+    Split a DataFrame into `num_clients` by pedestrian ID, sequentially.
+    Each pedestrian stays in a single client.
+    Returns a list of DataFrames, one per client.
+    """
+    df = df.copy()
+    df["pedestrian_id"] = df["pedestrian_id"].str.strip()
+    unique_peds = df["pedestrian_id"].unique()
 
-# Load single file for client 
-def load_data(partition_id: int, num_partitions: int, batch_size: int, hist=8, pred=12):
-    # Load a dataset file as training and validation DataLoader.
-    file = dataset_files[partition_id]
-    df = pd.read_csv(file, sep="\t", header=None)
-    df.columns = ["frame", "pedestrian_id", "x", "y"]
-    df["pedestrian_id"] = pd.factorize(df["pedestrian_id"])[0] # Make IDs unique per file
+    # Split pedestrian IDs sequentially
+    df["pedestrian_id"] = df["pedestrian_id"].str.strip()
+    ped_groups = np.array_split(unique_peds, num_clients)
+
+    client_dfs = []
+    for ped_ids in ped_groups:
+        client_dfs.append(df[df["pedestrian_id"].isin(ped_ids)].copy())
+    return client_dfs
+
+def load_data(partition_id: int, num_partitions: int, batch_size: int, hist=8, pred=12, big_df=None):
+    # If we have just one large, sorted file
+    if big_df is not None:
+        client_dfs = split_df_into_clients(big_df, num_partitions)
+        df = client_dfs[partition_id]
+    else:
+        file = dataset_files[partition_id]
+        df = pd.read_csv(file, sep="\t", header=None)
+        df.columns = ["frame", "pedestrian_id", "x", "y"]
 
     dataset = TrajectoryDataset(df, hist=hist, pred=pred)
     train_size = int(0.8 * len(dataset))
@@ -162,7 +185,7 @@ def load_data(partition_id: int, num_partitions: int, batch_size: int, hist=8, p
     return trainloader, valloader
 
 # For purposes of server evaluation / visualization
-def load_full_dataset(batch_size=32, hist=8, pred=12, num_partitions=5):
+def load_full_dataset(batch_size=32, hist=8, pred=12, num_partitions=8):
     datasets = []
     for file in dataset_files:
         df = pd.read_csv(file, sep="\t", header=None)
@@ -175,7 +198,7 @@ def load_full_dataset(batch_size=32, hist=8, pred=12, num_partitions=5):
     return dataloader
 
 # Training
-def train(model, trainloader, epochs, lr, device):
+def train(model, trainloader, epochs, lr, device, kl_weight = 0.001):
     model.to(device)  # move model to GPU if available
     criterion = nn.MSELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
@@ -188,8 +211,11 @@ def train(model, trainloader, epochs, lr, device):
             optimizer.zero_grad()
             pred, dest_dict = model(obs_disp, obs_abs, fut_abs)
             loss = criterion(pred, fut_abs)
-            dest_loss = nn.functional.mse_loss(dest_dict["D"], dest_dict["D_hat"])
-            loss = loss + 0.001 * dest_loss
+            #dest_loss = nn.functional.mse_loss(dest_dict["D"], dest_dict["D_hat"])
+            #loss = loss + 0.001 * dest_loss
+            if dest_dict is not None:
+                kl_loss = nn.functional.mse_loss(dest_dict["D"], dest_dict["D_hat"])
+                loss += kl_weight * kl_loss
             loss.backward()
             # torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0) # clip gradients
             optimizer.step()
