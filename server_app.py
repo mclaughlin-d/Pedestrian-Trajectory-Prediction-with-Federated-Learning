@@ -9,6 +9,7 @@ from flwr.serverapp.strategy import FedAdam
 
 # Dani added for testing TODO
 from flwr.common import RecordDict, MetricRecord
+import numpy as np
 
 import matplotlib
 matplotlib.use("Agg")  # Use non-interactive backend
@@ -28,28 +29,34 @@ def per_client_metrics(results: list[RecordDict], aggregation_type: str) -> Metr
     avg_record = {}
     avg_record["ADE"] = 0.0
     avg_record["FDE"] = 0.0
-    avg_record["miss_rate"] = 0.0
+    # avg_record["miss_rate"] = 0.0
+    i = 1
     for record in results:
+        print(f"Record iter {i}")
         ade = record.metric_records["metrics"]['ADE']
         fde = record.metric_records["metrics"]['FDE']
-        miss = record.metric_records["metrics"]["miss_rate"]
+        # miss = record.metric_records["metrics"]["miss_rate"]
         ade_list.append(ade)
         fde_list.append(fde)
-        miss_list.append(miss)
+        # miss_list.append(miss)
 
         avg_record["ADE"] += ade
         avg_record["FDE"] += fde
-        avg_record["miss_rate"] += miss
+
+        print(f"\tADE: {ade}")
+        print(f"\tFDE: {fde}")
+        i += 1
+        # avg_record["miss_rate"] += miss
 
     n = len(results)
     avg_record["ADE"] /= n
     avg_record["FDE"] /= n
-    avg_record["miss_rate"] /= n
+    # avg_record["miss_rate"] /= n
 
     # Add variance metrics
     avg_record["ADE_std"] = float(np.std(ade_list))
     avg_record["FDE_std"] = float(np.std(fde_list))
-    avg_record["miss_rate_std"] = float(np.std(miss_list))
+    # avg_record["miss_rate_std"] = float(np.std(miss_list))
 
     return MetricRecord(avg_record)
     
@@ -65,14 +72,14 @@ def main(grid: Grid, context: Context) -> None:
     global_model = TrajectoryLSTM(pred=12)
     arrays = ArrayRecord(global_model.state_dict())
 
-    """# Initialize FedAvg strategy
+    # Initialize FedAvg strategy
     strategy = FedAvg(fraction_evaluate=fraction_evaluate,
-                #  evaluate_metrics_aggr_fn=per_client_metrics     
-    )"""
-
-    strategy = FedAdam(
-        fraction_evaluate=1.0
+                evaluate_metrics_aggr_fn=per_client_metrics     
     )
+
+    # strategy = FedAdam(
+    #     fraction_evaluate=1.0
+    # )
 
     """strategy = FedProx(
         fraction_evaluate=fraction_evaluate,

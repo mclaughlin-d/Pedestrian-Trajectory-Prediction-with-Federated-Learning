@@ -206,9 +206,14 @@ def train(model, trainloader, epochs, lr, device, kl_weight = 0.001, mu=0.1):
     criterion = nn.MSELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     model.train()
-    all_batch_losses = []  # collect batch losses for variance/convergence
     running_loss = 0.0
-    for _ in range(epochs):
+
+    all_batch_losses = []
+    total_ade = 0
+    total_fde = 0
+    total_traj = 0
+    misses = 0
+    for i in range(epochs):
         for obs_disp, y, obs_abs, fut_abs in trainloader:
             obs_disp, y, obs_abs, fut_abs = obs_disp.to(device), y.to(device), obs_abs.to(device), fut_abs.to(device)
             optimizer.zero_grad()
@@ -232,16 +237,32 @@ def train(model, trainloader, epochs, lr, device, kl_weight = 0.001, mu=0.1):
             all_batch_losses.append(loss.item())
 
             running_loss += loss.item()
+
+            if i == epochs - 1:
+                dist = torch.sqrt(((pred - fut_abs) ** 2).sum(dim=2))
+                ade = dist.mean(dim=1)
+                fde = dist[:, -1]
+
+                total_ade += ade.sum().item()
+                total_fde += fde.sum().item()
+                total_traj += obs_disp.size(0)
+                total_traj += obs_disp.size(0)
+
     avg_loss = running_loss / (epochs * len(trainloader))
     loss_std = float(np.std(all_batch_losses))
     loss_min = float(np.min(all_batch_losses))
     loss_max = float(np.max(all_batch_losses))
+
+    ADE = total_ade / total_traj
+    FDE = total_fde / total_traj
     return {
         "avg_loss": avg_loss,
         "std_loss": loss_std,
         "min_loss": loss_min,
         "max_loss": loss_max,
-        "all_batch_losses": all_batch_losses
+        "all_batch_losses": all_batch_losses,
+        "ADE": ADE,
+        "FDE": FDE
     }
 
 def test(model, testloader, device, miss_threshold=0.5):
