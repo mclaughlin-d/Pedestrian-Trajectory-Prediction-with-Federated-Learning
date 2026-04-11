@@ -16,7 +16,7 @@ dependencies = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["."]
- 
+
 [tool.flwr.app]
 publisher = "flwrlabs"
 
@@ -25,20 +25,17 @@ serverapp = "server_app:app"
 clientapp = "client_app:app"
 
 [tool.flwr.app.config]
-num-server-rounds = 3
+num-server-rounds = 50
 fraction-fit = 1.0
 fraction-evaluate = 1.0
-local-epochs = 1
+local-epochs = 5
 learning-rate = 0.001
 batch-size = 32
-num-clients = 8
+num-clients = 5
 
 
 [tool.flwr.app.simulation]
-num-clients = 8
-fraction-fit = 1.0 
-fraction-evaluate = 1.0 
-client-resources = { "num_cpus" = 1 }
-
-
-
+num-clients = 5
+fraction-fit = 1.0
+fraction-evaluate = 1.0
+client-resources = { "num_cpus" = 1, "num_gpus" = 0.1 }

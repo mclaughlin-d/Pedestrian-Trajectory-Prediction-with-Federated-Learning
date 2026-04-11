@@ -9,6 +9,7 @@ from torch.utils.data import Dataset, DataLoader, ConcatDataset
 import matplotlib
 matplotlib.use("Agg")  # for headless servers
 import matplotlib.pyplot as plt
+import torch.nn.functional as F
 
 # Ignore FutureWarnings (swapaxes, Ray GPU warnings) to clean up logs
 warnings.simplefilter(action='ignore', category=FutureWarning)
@@ -45,8 +46,8 @@ class TrajectoryLSTM(nn.Module):
         self.dest_lstm_pred = nn.LSTM(input_dim, hidden_dim, batch_first=True)
  
         # FC -> mu + log_var for reparameterisation (VAE-style KL, like GTPPO)
-        self.dest_fc_obs     = nn.Linear(hidden_dim, latent_dim)
-        self.dest_fc_pred    = nn.Linear(hidden_dim, latent_dim)
+        self.dest_fc_obs = nn.Linear(hidden_dim, latent_dim)
+        self.dest_fc_pred = nn.Linear(hidden_dim, latent_dim)
  
         # Xavier init for all linear layers (paper: "After Xavier initialization")
         # https://www.geeksforgeeks.org/deep-learning/xavier-initialization/
@@ -91,7 +92,8 @@ class TrajectoryLSTM(nn.Module):
             # D_hat: 32-dim vector derived from ground-truth future (training only)
             D_hat = self._encode_destination(
                 gt_abs, self.dest_lstm_pred, self.dest_fc_pred)
-            dest_dict = {'D': D, 'D_hat': D_hat}
+            # using softmax so that this is mapped to a prob dist that will sum to 1?
+            dest_dict = {'D': F.softmax(D), 'D_hat': F.softmax(D_hat)}
             
         last_z   = Z[:, -1:, :]
         D_expand = D.unsqueeze(1)
@@ -215,7 +217,7 @@ def train(model, trainloader, epochs, lr, device, kl_weight = 0.001, mu=0.1):
             #dest_loss = nn.functional.mse_loss(dest_dict["D"], dest_dict["D_hat"])
             #loss = loss + 0.001 * dest_loss
             if dest_dict is not None:
-                kl_loss = nn.functional.mse_loss(dest_dict["D"], dest_dict["D_hat"])
+                kl_loss = F.kl_div(dest_dict["D"], dest_dict["D_hat"], reduction='batchmean')
                 loss += kl_weight * kl_loss
             """# FedProx term
             prox_term = 0.0

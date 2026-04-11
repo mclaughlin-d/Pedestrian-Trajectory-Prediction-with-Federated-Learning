@@ -8,7 +8,7 @@ import numpy as np
 
 from task import TrajectoryLSTM, load_data, test as test_fn, train as train_fn, dataset_files, sorted_dataset
 
-num_partitions = 14
+num_partitions = 8
 # Flower ClientApp
 app = ClientApp()
 
