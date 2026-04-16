@@ -93,7 +93,7 @@ class TrajectoryLSTM(nn.Module):
             D_hat = self._encode_destination(
                 gt_abs, self.dest_lstm_pred, self.dest_fc_pred)
             # using softmax so that this is mapped to a prob dist that will sum to 1?
-            dest_dict = {'D': F.softmax(D), 'D_hat': F.softmax(D_hat)}
+            dest_dict = {'D': F.log_softmax(D, dim=-1), 'D_hat': F.softmax(D_hat, dim=-1)} 
             
         last_z   = Z[:, -1:, :]
         D_expand = D.unsqueeze(1)
@@ -180,21 +180,29 @@ def load_data(partition_id: int, num_partitions: int, batch_size: int, hist=8, p
     dataset = TrajectoryDataset(df, hist=hist, pred=pred)
     train_size = int(0.8 * len(dataset))
     val_size = len(dataset) - train_size
-    train_dataset, val_dataset = torch.utils.data.random_split(dataset, [train_size, val_size])
+    generator = torch.Generator().manual_seed(42)
+    train_dataset, val_dataset = torch.utils.data.random_split(dataset, [train_size, val_size], generator=generator)
 
     trainloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     valloader = DataLoader(val_dataset, batch_size=batch_size)
     return trainloader, valloader
 
 # For purposes of server evaluation / visualization
-def load_full_dataset(batch_size=32, hist=8, pred=12, num_partitions=8):
-    datasets = []
-    for file in dataset_files:
-        df = pd.read_csv(file, sep="\t", header=None)
-        df.columns = ["frame", "pedestrian_id", "x", "y"]
-        datasets.append(TrajectoryDataset(df, hist=hist, pred=pred))
+# Returns only the 20% test split not used during client training (same seed as load_data).
+def load_full_dataset(batch_size=32, hist=8, pred=12, num_partitions=5):
+    test_datasets = []
 
-    concat_dataset = ConcatDataset(datasets)
+    for i in range(num_partitions):
+        df = pd.read_csv(dataset_files[i], sep="\t", header=None)
+        df.columns = ["frame", "pedestrian_id", "x", "y"]
+        dataset = TrajectoryDataset(df, hist=hist, pred=pred)
+        train_size = int(0.8 * len(dataset))
+        val_size = len(dataset) - train_size
+        generator = torch.Generator().manual_seed(42)
+        _, val_dataset = torch.utils.data.random_split(dataset, [train_size, val_size], generator=generator)
+        test_datasets.append(val_dataset)
+
+    concat_dataset = ConcatDataset(test_datasets)
     dataloader = DataLoader(concat_dataset, batch_size=batch_size)
 
     return dataloader
@@ -225,13 +233,13 @@ def train(model, trainloader, epochs, lr, device, kl_weight = 0.001, mu=0.1):
                 kl_loss = F.kl_div(dest_dict["D"], dest_dict["D_hat"], reduction='batchmean')
                 loss += kl_weight * kl_loss
             # FedProx term
-            prox_term = 0.0
-            for w, w_global in zip(model.parameters(), global_params):
-                prox_term += ((w - w_global) ** 2).sum()
+            # prox_term = 0.0
+            # for w, w_global in zip(model.parameters(), global_params):
+            #     prox_term += ((w - w_global) ** 2).sum()
 
-            loss += (mu / 2) * prox_term
+            # loss += (mu / 2) * prox_term
             loss.backward()
-            # torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0) # clip gradients
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0) # clip gradients
             optimizer.step()
             # Save batch loss for convergence analysis
             all_batch_losses.append(loss.item())
@@ -245,7 +253,6 @@ def train(model, trainloader, epochs, lr, device, kl_weight = 0.001, mu=0.1):
 
                 total_ade += ade.sum().item()
                 total_fde += fde.sum().item()
-                total_traj += obs_disp.size(0)
                 total_traj += obs_disp.size(0)
 
     avg_loss = running_loss / (epochs * len(trainloader))
