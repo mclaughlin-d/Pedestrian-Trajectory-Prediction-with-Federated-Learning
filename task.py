@@ -224,12 +224,12 @@ def train(model, trainloader, epochs, lr, device, kl_weight = 0.001, mu=0.1):
             if dest_dict is not None:
                 kl_loss = F.kl_div(dest_dict["D"], dest_dict["D_hat"], reduction='batchmean')
                 loss += kl_weight * kl_loss
-            """# FedProx term
+            # FedProx term
             prox_term = 0.0
             for w, w_global in zip(model.parameters(), global_params):
                 prox_term += ((w - w_global) ** 2).sum()
 
-            loss += (mu / 2) * prox_term"""
+            loss += (mu / 2) * prox_term
             loss.backward()
             # torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0) # clip gradients
             optimizer.step()

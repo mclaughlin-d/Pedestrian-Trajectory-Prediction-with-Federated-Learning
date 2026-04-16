@@ -8,7 +8,7 @@ import numpy as np
 
 from task import TrajectoryLSTM, load_data, test as test_fn, train as train_fn, dataset_files, sorted_dataset
 
-num_partitions = 8
+num_partitions = 5 # 8
 # Flower ClientApp
 app = ClientApp()
 
@@ -35,7 +35,7 @@ def train(msg: Message, context: Context):
     #partition_id = context.node_config["partition-id"]
     partition_id = context.node_config["partition-id"] % num_partitions
     batch_size = context.run_config["batch-size"]
-    trainloader, _ = load_data(partition_id, num_partitions, batch_size, hist=8, pred=12, big_df=big_df)
+    trainloader, _ = load_data(partition_id, num_partitions, batch_size, hist=8, pred=12, big_df=None)
 
 
     # Train the model
@@ -83,7 +83,7 @@ def evaluate(msg: Message, context: Context):
     #partition_id = context.node_config["partition-id"]
     partition_id = context.node_config["partition-id"] % num_partitions
     batch_size = context.run_config["batch-size"]
-    _, valloader = load_data(partition_id, num_partitions, batch_size, hist=8, pred=12, big_df=big_df)
+    _, valloader = load_data(partition_id, num_partitions, batch_size, hist=8, pred=12, big_df=None)
 
     # Call the evaluation function
     ADE, FDE, miss_rate = test_fn(model, valloader, device)
