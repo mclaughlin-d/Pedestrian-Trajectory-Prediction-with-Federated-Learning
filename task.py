@@ -25,7 +25,7 @@ dataset_files = [
     "datasets/students003.txt",
     "datasets/uni_examples.txt"
 ]
-sorted_dataset = "sorted_by_mean_speed.txt"
+sorted_dataset = "datasets/sorted_datasets/sorted_by_mean_speed.txt"
 
 # Model
 class TrajectoryLSTM(nn.Module):

@@ -3,14 +3,14 @@ import numpy as np
 
 # Dataset files
 dataset_files = [
-    "datasets/biwi_eth.txt",
-    "datasets/biwi_hotel.txt",
-    "datasets/crowds_zara01.txt",
-    "datasets/crowds_zara02.txt",
-    "datasets/crowds_zara03.txt",
-    "datasets/students001.txt",
-    "datasets/students003.txt",
-    "datasets/uni_examples.txt"
+    "datasets/original_datasets/biwi_eth.txt",
+    "datasets/original_datasets/biwi_hotel.txt",
+    "datasets/original_datasets/crowds_zara01.txt",
+    "datasets/original_datasets/crowds_zara02.txt",
+    "datasets/original_datasets/crowds_zara03.txt",
+    "datasets/original_datasets/students001.txt",
+    "datasets/original_datasets/students003.txt",
+    "datasets/original_datasets/uni_examples.txt"
 ]
 
 # Load all 8 txt files into one structure and add a scene/file ID so pedestrians don’t collide.
@@ -250,7 +250,7 @@ if __name__ == "__main__":
 
     for name, (feature, asc) in features.items():
         sorted_data = sort_by_feature(data, feature, ascending=asc)
-        filename = f"sorted_by_{name}.txt"
+        filename = f"datasets/sorted_datasets/sorted_by_{name}.txt"
         
         # Keep only relevant columns
         cols_to_keep = ["frame", "global_ped_id", "x", "y", feature]
