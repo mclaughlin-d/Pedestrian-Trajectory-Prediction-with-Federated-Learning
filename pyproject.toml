@@ -1,0 +1,41 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "quickstart-pytorch"
+version = "1.0.1"
+description = "Federated Learning with PyTorch and Flower (Quickstart Example)"
+license = "Apache-2.0"
+dependencies = [
+    "flwr[simulation]>=1.26.0",
+    "flwr-datasets[vision]>=0.5.0",
+    "torch==2.8.0",
+    "torchvision==0.23.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["."]
+
+[tool.flwr.app]
+publisher = "flwrlabs"
+
+[tool.flwr.app.components]
+serverapp = "server_app:app"
+clientapp = "client_app:app"
+
+[tool.flwr.app.config]
+num-server-rounds = 5
+fraction-fit = 1.0
+fraction-evaluate = 1.0
+local-epochs = 5
+learning-rate = 0.001
+batch-size = 32
+num-clients = 5
+
+
+[tool.flwr.app.simulation]
+num-clients = 5
+fraction-fit = 1.0
+fraction-evaluate = 1.0
+client-resources = { "num_cpus" = 1, "num_gpus" = 0.1 }
