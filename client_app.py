@@ -32,7 +32,6 @@ def train(msg: Message, context: Context):
 
     # Load the data
     
-    #partition_id = context.node_config["partition-id"]
     partition_id = context.node_config["partition-id"] % num_partitions
     batch_size = context.run_config["batch-size"]
     trainloader, _ = load_data(partition_id, num_partitions, batch_size, hist=8, pred=12, big_df=big_df)
@@ -80,7 +79,6 @@ def evaluate(msg: Message, context: Context):
     model.to(device)
 
     # Load the data
-    #partition_id = context.node_config["partition-id"]
     partition_id = context.node_config["partition-id"] % num_partitions
     batch_size = context.run_config["batch-size"]
     _, valloader = load_data(partition_id, num_partitions, batch_size, hist=8, pred=12, big_df=big_df)

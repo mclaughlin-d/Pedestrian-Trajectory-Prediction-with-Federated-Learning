@@ -107,7 +107,7 @@ class TrajectoryLSTM(nn.Module):
             # Q^{T_obs+1} = F_dec(H^{T_obs}, Z^{T_obs} || D; W_d) - this is equation 5
             out, (h_dec, c_dec) = self.decoder(dec_input, (h_dec, c_dec))
             # delta = delta(Q, W_c) - this is equation 6
-            delta = self.fc2(out.squeeze(1))          # (B, 2)
+            delta = self.fc2(out.squeeze(1))
             last_abs = last_abs + delta # inverse of Eqs 3-4
             pred_abs_list.append(last_abs.unsqueeze(1))
  
@@ -115,7 +115,7 @@ class TrajectoryLSTM(nn.Module):
             z_next = self.fc1(delta.unsqueeze(1))
             dec_input = torch.cat([z_next, D_expand], dim=-1)
  
-        pred_abs = torch.cat(pred_abs_list, dim=1)          # (B, pred_len, 2)
+        pred_abs = torch.cat(pred_abs_list, dim=1)
         return pred_abs, dest_dict
 
 # Dataset
@@ -180,9 +180,7 @@ def load_data(partition_id: int, num_partitions: int, batch_size: int, hist=8, p
     dataset = TrajectoryDataset(df, hist=hist, pred=pred)
     train_size = int(0.8 * len(dataset))
     val_size = len(dataset) - train_size
-    generator = torch.Generator().manual_seed(42)
-    train_dataset, val_dataset = torch.utils.data.random_split(dataset, [train_size, val_size], generator=generator)
-
+    train_dataset, val_dataset = torch.utils.data.random_split(dataset, [train_size, val_size])
     trainloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     valloader = DataLoader(val_dataset, batch_size=batch_size)
     return trainloader, valloader
@@ -192,17 +190,26 @@ def load_data(partition_id: int, num_partitions: int, batch_size: int, hist=8, p
 def load_full_dataset(batch_size=32, hist=8, pred=12, num_partitions=5):
     test_datasets = []
 
-    for i in range(num_partitions):
-        df = pd.read_csv(dataset_files[i], sep="\t", header=None)
-        df.columns = ["frame", "pedestrian_id", "x", "y"]
-        dataset = TrajectoryDataset(df, hist=hist, pred=pred)
-        train_size = int(0.8 * len(dataset))
-        val_size = len(dataset) - train_size
-        generator = torch.Generator().manual_seed(42)
-        _, val_dataset = torch.utils.data.random_split(dataset, [train_size, val_size], generator=generator)
-        test_datasets.append(val_dataset)
+    # for i in range(num_partitions):
+    #     df = pd.read_csv(dataset_files[i], sep="\t", header=None)
+    #     df.columns = ["frame", "pedestrian_id", "x", "y"]
+    #     dataset = TrajectoryDataset(df, hist=hist, pred=pred)
+    #     train_size = int(0.8 * len(dataset))
+    #     val_size = len(dataset) - train_size
+    #     generator = torch.Generator().manual_seed(42)
+    #     _, val_dataset = torch.utils.data.random_split(dataset, [train_size, val_size], generator=generator)
+    #     test_datasets.append(val_dataset)
 
-    concat_dataset = ConcatDataset(test_datasets)
+
+    datasets = []
+    for file in dataset_files:
+        df = pd.read_csv(file, sep="\t", header=None)
+        df.columns = ["frame", "pedestrian_id", "x", "y"]
+        datasets.append(TrajectoryDataset(df, hist=hist, pred=pred))
+
+
+    # concat_dataset = ConcatDataset(test_datasets)
+    concat_dataset = ConcatDataset(datasets)
     dataloader = DataLoader(concat_dataset, batch_size=batch_size)
 
     return dataloader
@@ -227,8 +234,7 @@ def train(model, trainloader, epochs, lr, device, kl_weight = 0.001, mu=0.1):
             optimizer.zero_grad()
             pred, dest_dict = model(obs_disp, obs_abs, fut_abs)
             loss = criterion(pred, fut_abs)
-            #dest_loss = nn.functional.mse_loss(dest_dict["D"], dest_dict["D_hat"])
-            #loss = loss + 0.001 * dest_loss
+
             if dest_dict is not None:
                 kl_loss = F.kl_div(dest_dict["D"], dest_dict["D_hat"], reduction='batchmean')
                 loss += kl_weight * kl_loss
