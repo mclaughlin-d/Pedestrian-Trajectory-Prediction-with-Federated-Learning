@@ -73,18 +73,18 @@ def main(grid: Grid, context: Context) -> None:
     arrays = ArrayRecord(global_model.state_dict())
 
     # Initialize FedAvg strategy
-    strategy = FedAvg(fraction_evaluate=fraction_evaluate,
-                # evaluate_metrics_aggr_fn=per_client_metrics     
-    )
+    # strategy = FedAvg(fraction_evaluate=fraction_evaluate,
+    #             # evaluate_metrics_aggr_fn=per_client_metrics     
+    # )
 
     # strategy = FedAdam(
     #     fraction_evaluate=1.0
     # )
 
-    # strategy = FedProx(
-    #     fraction_evaluate=fraction_evaluate,
-    #     proximal_mu=0.1 
-    # )
+    strategy = FedProx(
+        fraction_evaluate=fraction_evaluate,
+        proximal_mu=0.1 
+    )
   
     # Start strategy, run FedAvg for `num_rounds`
     result = strategy.start(
