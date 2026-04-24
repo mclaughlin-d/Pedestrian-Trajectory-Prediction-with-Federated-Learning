@@ -16,16 +16,16 @@ warnings.simplefilter(action='ignore', category=FutureWarning)
 
 # Dataset files
 dataset_files = [
-    "datasets/biwi_eth.txt",
-    "datasets/biwi_hotel.txt",
-    "datasets/crowds_zara01.txt",
-    "datasets/crowds_zara02.txt",
-    "datasets/crowds_zara03.txt",
-    "datasets/students001.txt",
-    "datasets/students003.txt",
-    "datasets/uni_examples.txt"
+    "datasets/original_datasets/biwi_eth.txt",
+    "datasets/original_datasets/biwi_hotel.txt",
+    "datasets/original_datasets/crowds_zara01.txt",
+    "datasets/original_datasets/crowds_zara02.txt",
+    "datasets/original_datasets/crowds_zara03.txt",
+    "datasets/original_datasets/students001.txt",
+    "datasets/original_datasets/students003.txt",
+    "datasets/original_datasets/uni_examples.txt"
 ]
-sorted_dataset = "datasets/sorted_datasets/sorted_by_mean_speed.txt"
+sorted_dataset = "datasets/sorted_datasets/sorted_by_speed_variance.txt"
 
 # Model
 class TrajectoryLSTM(nn.Module):
@@ -125,6 +125,7 @@ class TrajectoryDataset(Dataset):
         for pid, g in df.groupby("pedestrian_id"):
             coords = g.sort_values("frame")[["x", "y"]].values
 
+            # this quietly filters out pedestrians with < 20 frames
             for i in range(len(coords) - hist - pred + 1):
                 obs_abs = coords[i:i+hist]
                 fut_abs = coords[i+hist:i+hist+pred]
@@ -177,6 +178,8 @@ def load_data(partition_id: int, num_partitions: int, batch_size: int, hist=8, p
         df = pd.read_csv(file, sep="\t", header=None)
         df.columns = ["frame", "pedestrian_id", "x", "y"]
 
+    # TODO: currently, each client is validated on data from the same partition
+    # this results in better-than-expected per-client metrics
     dataset = TrajectoryDataset(df, hist=hist, pred=pred)
     train_size = int(0.8 * len(dataset))
     val_size = len(dataset) - train_size
@@ -239,11 +242,11 @@ def train(model, trainloader, epochs, lr, device, kl_weight = 0.001, mu=0.1):
                 kl_loss = F.kl_div(dest_dict["D"], dest_dict["D_hat"], reduction='batchmean')
                 loss += kl_weight * kl_loss
             # FedProx term
-            # prox_term = 0.0
-            # for w, w_global in zip(model.parameters(), global_params):
-            #     prox_term += ((w - w_global) ** 2).sum()
+            prox_term = 0.0
+            for w, w_global in zip(model.parameters(), global_params):
+                prox_term += ((w - w_global) ** 2).sum()
 
-            # loss += (mu / 2) * prox_term
+            loss += (mu / 2) * prox_term
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0) # clip gradients
             optimizer.step()

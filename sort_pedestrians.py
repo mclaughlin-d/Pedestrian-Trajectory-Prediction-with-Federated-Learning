@@ -1,5 +1,6 @@
 import pandas as pd
 import numpy as np
+import random
 
 # Dataset files
 dataset_files = [
@@ -224,7 +225,6 @@ if __name__ == "__main__":
     data = compute_group_metrics(data, radius=1.0, epsilon=0.1)  # compute group metrics
 
 
-
     # Assign pedestrian-level constants to all frames
     data["mean_speed"] = data.groupby("global_ped_id")["speed"].transform("mean")
     data["speed_var"] = data.groupby("global_ped_id")["speed"].transform("var")
@@ -255,3 +255,8 @@ if __name__ == "__main__":
         # Keep only relevant columns
         cols_to_keep = ["frame", "global_ped_id", "x", "y", feature]
         sorted_data[cols_to_keep].to_csv(filename, sep="\t", index=False)
+
+    # also output combined data for easier non-sorted testing
+    filename = f"datasets/sorted_datasets/non_sorted.txt"
+    cols_to_keep = ["frame", "global_ped_id", "x", "y", feature]
+    data[cols_to_keep].to_csv(filename, sep="\t", index=False)
