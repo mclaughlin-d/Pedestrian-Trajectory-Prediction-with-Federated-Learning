@@ -4,7 +4,7 @@ This repo contains code for our final project for EECE 5643 (Simulation & Perfor
 ## Description
 
 ### Datasets
-We used pre-annotated versions of the ETH and UCY pedestrian datasets, taken from the implementationed used in [this paper](https://arxiv.org/pdf/1803.10892) [1]. 
+We used pre-annotated versions of the ETH and UCY pedestrian datasets, taken from the implementation in [this paper](https://arxiv.org/pdf/1803.10892) [1]. 
 
 ### Model Architecture
 We based our model architecture off of that described in [this paper](https://link.springer.com/article/10.1007/s40747-023-01239-5) [2]. It uses an LSTM encoder/decoder to predict the next 12 frames of a pedestrian's trajectory given 8 history frames. 
