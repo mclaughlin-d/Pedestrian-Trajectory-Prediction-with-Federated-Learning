@@ -27,7 +27,32 @@ def create_global_id(data):
     data["global_ped_id"] = data["scene_id"].astype(str) + "_" + data["ped_id"].astype(str)
     return data
 
-# Compute speed in m/s
+
+def compute_speed(data):
+    """
+    Assumes:
+    - data is already subsampled (every 10 frames)
+    - each row = 0.4 seconds apart in real time
+    """
+
+    data = data.sort_values(["global_ped_id", "frame"]).copy()
+
+    dx = data.groupby("global_ped_id")["x"].diff()
+    dy = data.groupby("global_ped_id")["y"].diff()
+
+    dist = np.sqrt(dx**2 + dy**2)
+
+    TIME_STEP = 0.4  # ground-truth assumption for ETH/UCY style data
+
+    speed = dist / TIME_STEP
+
+    # only keep valid consecutive points
+    dt_frames = data.groupby("global_ped_id")["frame"].diff()
+    speed[dt_frames != 10] = np.nan
+
+    data["speed"] = speed
+    return data
+"""# Compute speed in m/s
 def compute_speed(data):
     data = data.sort_values(by=["global_ped_id", "frame"]).reset_index(drop=True)
 
@@ -43,7 +68,7 @@ def compute_speed(data):
     speed[dt != 10] = np.nan
 
     data["speed"] = speed
-    return data
+    return data"""
 
 # Get mean speed per pedestrian
 def compute_mean_speed(data):
@@ -82,7 +107,7 @@ def compute_acceleration(data):
     FRAME_TIME = 0.4
     
     # Compute acceleration
-    acceleration = dv / (dt * FRAME_TIME)
+    acceleration = dv / (FRAME_TIME)
     
     # Invalidate first row per pedestrian
     first_idx = data.groupby("global_ped_id").head(1).index
@@ -119,35 +144,36 @@ def compute_curvature(data):
     return data
 
 def compute_density(data, radius=2.0):
-    densities = []
+    densities = {}
 
-    for frame, frame_data in data.groupby("frame"):
+    for (scene_id, frame), frame_data in data.groupby(["scene_id", "frame"]):
         coords = frame_data[["x", "y"]].values
-        n = len(coords)
 
         dists = np.sqrt(((coords[:, None, :] - coords[None, :, :])**2).sum(axis=2))
         density = (dists < radius).sum(axis=1) - 1  # exclude self
 
-        densities.extend(density)
+        for idx, d in zip(frame_data.index, density):
+            densities[idx] = d
 
-    data["local_density"] = densities
+    data["local_density"] = data.index.map(densities)
     return data
 
 def compute_nearest_neighbor(data):
-    nn_dist = []
+    nn_dist = {}
 
-    for frame, frame_data in data.groupby("frame"):
+    for (scene_id, frame), frame_data in data.groupby(["scene_id", "frame"]):
         coords = frame_data[["x", "y"]].values
 
         dists = np.sqrt(((coords[:, None, :] - coords[None, :, :])**2).sum(axis=2))
         np.fill_diagonal(dists, np.inf)
 
         nn = dists.min(axis=1)
-        # Replace inf with NaN
         nn[nn == np.inf] = np.nan
-        nn_dist.extend(nn)
 
-    data["nn_distance"] = nn_dist
+        for idx, d in zip(frame_data.index, nn):
+            nn_dist[idx] = d
+
+    data["nn_distance"] = data.index.map(nn_dist)
     return data
 
 # Compute velocity per pedestrian
@@ -158,8 +184,8 @@ def compute_velocity(data):
     dt = data.groupby("global_ped_id")["frame"].diff()
     FRAME_TIME = 0.4
 
-    vx = dx / (dt * FRAME_TIME)
-    vy = dy / (dt * FRAME_TIME)
+    vx = dx / (FRAME_TIME)
+    vy = dy / (FRAME_TIME)
 
     # First row per pedestrian is NaN
     first_idx = data.groupby("global_ped_id").head(1).index
@@ -168,38 +194,31 @@ def compute_velocity(data):
 
     data["vx"] = vx
     data["vy"] = vy
-    data["speed"] = np.sqrt(vx**2 + vy**2)
+    #data["speed"] = np.sqrt(vx**2 + vy**2)
     return data
 
 # Compute group metrics per pedestrian
-def compute_group_metrics(data, radius=1.0, epsilon=0.1):
-    """
-    radius: max distance to consider two pedestrians in a group
-    epsilon: max speed difference for velocity similarity
-    """
-    # Initialize storage
-    data["in_group"] = 0
-    data["group_size"] = 1  # include self
+def compute_group_metrics(data, radius=2.0, epsilon=0.1):
+    in_group = {}
+    group_size = {}
 
-    for frame, frame_data in data.groupby("frame"):
+    for (scene_id, frame), frame_data in data.groupby(["scene_id", "frame"]):
         coords = frame_data[["x", "y"]].values
         vels = frame_data[["vx", "vy"]].values
-        n = len(frame_data)
 
-        # Compute pairwise distances
         dists = np.sqrt(((coords[:, None, :] - coords[None, :, :])**2).sum(axis=2))
-        # Compute pairwise velocity differences
         vel_diffs = np.sqrt(((vels[:, None, :] - vels[None, :, :])**2).sum(axis=2))
 
-        # Group mask: distance < radius and velocity difference < epsilon
         group_mask = (dists < radius) & (vel_diffs < epsilon)
-
-        # Count number of other pedestrians in group for each pedestrian
         group_sizes = group_mask.sum(axis=1)
-        data.loc[frame_data.index, "in_group"] = (group_sizes > 1).astype(int)
-        data.loc[frame_data.index, "group_size"] = group_sizes
 
-    # Aggregate pedestrian-level metrics
+        for idx, gs in zip(frame_data.index, group_sizes):
+            in_group[idx] = int(gs > 1)
+            group_size[idx] = gs
+
+    data["in_group"] = data.index.map(in_group)
+    data["group_size"] = data.index.map(group_size)
+
     ped_group = data.groupby("global_ped_id").agg(
         fraction_time_in_group=("in_group", "mean"),
         avg_group_size=("group_size", "mean")
@@ -207,6 +226,31 @@ def compute_group_metrics(data, radius=1.0, epsilon=0.1):
 
     data = data.merge(ped_group, on="global_ped_id", how="left")
     return data
+
+def compute_feature_stats(df, feature, label="GLOBAL"):
+    # collapse to one value per pedestrian
+    ped_df = df.groupby("global_ped_id", observed=True)[feature].mean()
+    num_pedestrians = ped_df.shape[0]
+    stats = {
+        "label": label,
+        "num_pedestrians": num_pedestrians,
+        "mean": ped_df.mean(),
+        "std": ped_df.std(),
+        "min": ped_df.min(),
+        "max": ped_df.max()
+    }
+    return stats
+
+def split_into_partitions(df, num_partitions=5):
+    unique_peds = df["global_ped_id"].unique()
+    ped_groups = np.array_split(unique_peds, num_partitions)
+
+    partitions = []
+    for ped_ids in ped_groups:
+        part_df = df[df["global_ped_id"].isin(ped_ids)].copy()
+        partitions.append(part_df)
+
+    return partitions
 
 if __name__ == "__main__":
 
@@ -255,3 +299,29 @@ if __name__ == "__main__":
         # Keep only relevant columns
         cols_to_keep = ["frame", "global_ped_id", "x", "y", feature]
         sorted_data[cols_to_keep].to_csv(filename, sep="\t", index=False)
+
+    for name, (feature, asc) in features.items():
+        print(f"\n===== FEATURE: {name} =====")
+
+        sorted_data = sort_by_feature(data, feature, ascending=asc)
+
+        # ---- GLOBAL STATS ----
+        global_stats = compute_feature_stats(sorted_data, feature, label="GLOBAL")
+        print(global_stats)
+
+        # ---- SPLIT INTO 5 PARTITIONS ----
+        partitions = split_into_partitions(sorted_data, num_partitions=5)
+
+        all_stats = [global_stats]
+
+        for i, part in enumerate(partitions):
+            num_unique = part["global_ped_id"].nunique()
+            print(f"CLIENT_{i} unique pedestrians: {num_unique}")
+            stats = compute_feature_stats(part, feature, label=f"CLIENT_{i}")
+            all_stats.append(stats)
+            print(stats)
+
+        # ---- SAVE STATS ----
+        stats_df = pd.DataFrame(all_stats)
+        stats_filename = f"stats_{name}.csv"
+        stats_df.to_csv(stats_filename, index=False)
