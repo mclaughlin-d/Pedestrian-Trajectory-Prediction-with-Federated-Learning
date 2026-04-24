@@ -25,7 +25,7 @@ dataset_files = [
     "datasets/original_datasets/students003.txt",
     "datasets/original_datasets/uni_examples.txt"
 ]
-sorted_dataset = "datasets/sorted_datasets/sorted_by_curvature.txt"
+sorted_dataset = "datasets/sorted_datasets/sorted_by_speed_variance.txt"
 
 # Model
 class TrajectoryLSTM(nn.Module):
@@ -178,6 +178,8 @@ def load_data(partition_id: int, num_partitions: int, batch_size: int, hist=8, p
         df = pd.read_csv(file, sep="\t", header=None)
         df.columns = ["frame", "pedestrian_id", "x", "y"]
 
+    # TODO: currently, each client is validated on data from the same partition
+    # this results in better-than-expected per-client metrics
     dataset = TrajectoryDataset(df, hist=hist, pred=pred)
     train_size = int(0.8 * len(dataset))
     val_size = len(dataset) - train_size
